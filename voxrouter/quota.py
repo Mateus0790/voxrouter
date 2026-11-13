@@ -4,6 +4,7 @@ Semântica (inspirada no quota-aware do OmniRoute):
 - Consumo só conta em síntese BEM-SUCEDIDA (falha e cache hit não consomem).
 - Período é de calendário (mês = "2026-11", dia = "2026-11-13"); ao virar o
   período o contador recomeça sozinho.
+- Com `sync: true`, o uso real informado pelo provedor sobrescreve o contador.
 - status: unlimited | ok | low (dentro da reserva) | exhausted.
 """
 
@@ -23,7 +24,7 @@ class QuotaManager:
     def __init__(self, state_path: str | Path) -> None:
         self.state_path = Path(state_path)
         self._lock = threading.Lock()
-        self._data: dict[str, dict[str, int]] = {}
+        self._data: dict[str, dict[str, Any]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -44,12 +45,16 @@ class QuotaManager:
         return dt.strftime("%Y-%m") if period == "month" else dt.strftime("%Y-%m-%d")
 
     def used(self, name: str, q: QuotaConfig) -> int:
-        return self._data.get(name, {}).get(self.period_key(q.period), 0)
+        return int(self._data.get(name, {}).get(self.period_key(q.period), 0))
 
-    def remaining(self, name: str, q: QuotaConfig) -> int:
+    def remaining(self, name: str, q: QuotaConfig) -> int | None:
+        if q.limit is None:
+            return None
         return max(0, q.limit - self.used(name, q))
 
     def status(self, name: str, q: QuotaConfig) -> str:
+        if q.limit is None:  # sync ainda não trouxe o limite
+            return "ok"
         used = self.used(name, q)
         if used >= q.limit:
             return "exhausted"
@@ -61,8 +66,19 @@ class QuotaManager:
         with self._lock:
             pk = self.period_key(q.period)
             entry = self._data.setdefault(name, {})
-            entry[pk] = entry.get(pk, 0) + n_chars
+            entry[pk] = int(entry.get(pk, 0)) + n_chars
             self._save()
+
+    def set_used(self, name: str, q: QuotaConfig, used: int) -> None:
+        """Sobrescreve o consumo do período atual (sincronização com o provedor)."""
+        with self._lock:
+            entry = self._data.setdefault(name, {})
+            entry[self.period_key(q.period)] = int(used)
+            entry["_synced_at"] = datetime.now().isoformat(timespec="seconds")
+            self._save()
+
+    def synced_at(self, name: str) -> str | None:
+        return self._data.get(name, {}).get("_synced_at")
 
     def reset(self, name: str | None = None) -> None:
         with self._lock:
@@ -72,19 +88,19 @@ class QuotaManager:
                 self._data.clear()
             self._save()
 
+    def describe(self, name: str, q: QuotaConfig | None) -> dict[str, Any]:
+        if q is None:
+            return {"quota": None, "status": "unlimited"}
+        return {
+            "limit": q.limit,
+            "period": q.period,
+            "reserve": q.reserve,
+            "sync": q.sync,
+            "synced_at": self.synced_at(name),
+            "used": self.used(name, q),
+            "remaining": self.remaining(name, q),
+            "status": self.status(name, q),
+        }
+
     def snapshot(self, providers_cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        out: dict[str, dict[str, Any]] = {}
-        for name, pcfg in providers_cfg.items():
-            q = pcfg.quota
-            if q is None:
-                out[name] = {"quota": None, "status": "unlimited"}
-            else:
-                out[name] = {
-                    "limit": q.limit,
-                    "period": q.period,
-                    "reserve": q.reserve,
-                    "used": self.used(name, q),
-                    "remaining": self.remaining(name, q),
-                    "status": self.status(name, q),
-                }
-        return out
+        return {name: self.describe(name, pcfg.quota) for name, pcfg in providers_cfg.items()}

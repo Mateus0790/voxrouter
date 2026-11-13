@@ -5,15 +5,27 @@ from __future__ import annotations
 from typing import Type
 
 from ..config import ProviderConfig
-from .base import BaseProvider, ProviderContext, ProviderError, SynthesisRequest, SynthesisResult
-from .mock import MockProvider
-from .edge import EdgeProvider
-from .openai import OpenAIProvider
-from .elevenlabs import ElevenLabsProvider
-from .google import GoogleProvider
+from .base import (
+    BaseProvider,
+    ProviderContext,
+    ProviderError,
+    SynthesisRequest,
+    SynthesisResult,
+    TranscriptionRequest,
+    TranscriptionResult,
+)
 from .azure import AzureProvider
+from .cartesia import CartesiaProvider
+from .deepgram import DeepgramProvider
+from .edge import EdgeProvider
+from .elevenlabs import ElevenLabsProvider
+from .fish import FishAudioProvider
+from .google import GoogleProvider
 from .kokoro import KokoroProvider
+from .mock import MockProvider
 from .omnivoice import OmniVoiceProvider
+from .openai import OpenAIProvider
+from .whisper_local import WhisperLocalProvider
 
 REGISTRY: dict[str, Type[BaseProvider]] = {
     "mock": MockProvider,
@@ -24,6 +36,10 @@ REGISTRY: dict[str, Type[BaseProvider]] = {
     "azure": AzureProvider,
     "kokoro": KokoroProvider,
     "omnivoice": OmniVoiceProvider,
+    "cartesia": CartesiaProvider,
+    "deepgram": DeepgramProvider,
+    "fish": FishAudioProvider,
+    "whisper_local": WhisperLocalProvider,
 }
 
 
@@ -44,4 +60,6 @@ __all__ = [
     "ProviderError",
     "SynthesisRequest",
     "SynthesisResult",
+    "TranscriptionRequest",
+    "TranscriptionResult",
 ]

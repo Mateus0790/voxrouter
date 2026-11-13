@@ -1,16 +1,17 @@
 # ============================================================
-#  VoxRouter — configuração de provedores e rotas
-#  Copie para config.yaml e ajuste.
+#  VoxRouter — configuração de provedores e rotas (v0.2)
+#  Copie para config.yaml e ajuste. Chaves via variáveis de ambiente.
+#  Expansão Docker: ${VAR} e ${VAR:-padrão}
 # ============================================================
 
 providers:
   edge:                       # grátis, sem chave (Microsoft Edge TTS)
     type: edge
-    cost_per_char: 0.0001     # unidade arbitrária p/ estratégia 'cheapest'
-    quota:                    # opcional: cota de caracteres por período (controle local)
-      limit: 100000           # ajuste à sua realidade de uso
-      period: month           # day | month
-      reserve: 0.05           # últimos 5% = status "low" (vai pro fim da fila)
+    cost_per_char: 0.0001
+    quota:
+      limit: 100000
+      period: month
+      reserve: 0.05
     options:
       voice: pt-BR-AntonioNeural
 
@@ -28,6 +29,10 @@ providers:
     api_key_env: ELEVENLABS_API_KEY
     base_url: https://api.elevenlabs.io
     cost_per_char: 0.0015
+    quota:
+      sync: true               # puxa uso real de /v1/user/subscription
+      period: month
+      reserve: 0.05
     options:
       model: eleven_multilingual_v2
       voice_id: 21m00Tcm4TlvDq8ikWAM
@@ -37,7 +42,7 @@ providers:
     api_key_env: GOOGLE_TTS_API_KEY
     cost_per_char: 0.0004
     quota:
-      limit: 1000000          # free tier do Google: 1M chars/mês
+      limit: 1000000
       period: month
     options:
       language_code: pt-BR
@@ -48,51 +53,104 @@ providers:
     api_key_env: AZURE_SPEECH_KEY
     cost_per_char: 0.0008
     options:
-      region: eastus            # ou variável de ambiente AZURE_SPEECH_REGION
+      region: ${AZURE_SPEECH_REGION:-eastus}
       voice: pt-BR-FranciscaNeural
 
-  kokoro:                      # local: kokoro-fastapi (docker) em :8880
+  cartesia:                    # baixa latência (Sonic)
+    type: cartesia
+    api_key_env: CARTESIA_API_KEY
+    cost_per_char: 0.0012
+    options:
+      model: sonic-3.6
+      voice: ${CARTESIA_VOICE_ID:-}   # UUID da voz na sua conta
+      language: pt
+
+  deepgram:                    # TTS Aura + STT Nova
+    type: deepgram
+    api_key_env: DEEPGRAM_API_KEY
+    cost_per_char: 0.0005
+    options:
+      voice: aura-2-thalia-en
+
+  fish:                        # Fish Audio (clonagem via reference_id)
+    type: fish
+    api_key_env: FISH_API_KEY
+    cost_per_char: 0.0010
+    options:
+      model: s2.1-pro          # ou s2.1-pro-free no plano gratuito
+      # voice: <reference_id>
+
+  kokoro:                      # local: kokoro-fastapi em :8880
     type: kokoro
-    base_url: http://localhost:8880
+    base_url: ${KOKORO_URL:-http://localhost:8880}
     cost_per_char: 0.0
     options:
       voice: af_heart
 
   omnivoice:                   # local: omnivoice-openai-tts-server em :6655
     type: omnivoice
-    base_url: http://localhost:6655
+    base_url: ${OMNIVOICE_URL:-http://localhost:6655}
     cost_per_char: 0.0
     options:
       model: omnivoice
 
-  mock:                        # tom senoidal WAV p/ testes (options.fail: true simula queda)
+  whisper:                     # STT local via faster-whisper (pip install "voxrouter[local-stt]")
+    type: whisper_local
+    options:
+      model: base              # tiny | base | small | medium | large-v3
+      device: cpu
+      compute_type: int8
+
+  mock:                        # tom senoidal WAV p/ testes
     type: mock
     cost_per_char: 0.0
 
 # ============================================================
-#  Rotas: nome do modelo → provedores + estratégia + regras
+#  Aliases de voz — mesma "persona" em vários provedores
+# ============================================================
+voices:
+  pt-br-narrador-masculino:
+    description: narrador masculino pt-BR
+    voices:
+      edge: pt-BR-AntonioNeural
+      openai: onyx
+      google: pt-BR-Neural2-B
+      azure: pt-BR-AntonioNeural
+
+  pt-br-narradora-feminina:
+    description: narradora feminina pt-BR
+    strict: false
+    voices:
+      edge: pt-BR-FranciscaNeural
+      openai: nova
+      google: pt-BR-Neural2-C
+      azure: pt-BR-FranciscaNeural
+
+# ============================================================
+#  Rotas TTS
 # ============================================================
 models:
-  auto:                        # rota padrão: tenta na ordem, com failover automático
+  auto:
     strategy: first
-    providers: [kokoro, edge, openai]
+    providers: [edge, openai, deepgram]
 
   barato:
     strategy: cheapest
-    providers: [edge, kokoro, google, openai, elevenlabs]
+    providers: [edge, kokoro, google, deepgram, openai, fish, cartesia, elevenlabs]
 
-  economico:                   # quota_aware: mais barato ENTRE os que ainda têm cota
+  economico:
     strategy: quota_aware
-    providers: [edge, google, openai]
+    providers: [edge, google, openai, elevenlabs]
 
   qualidade:
     strategy: weighted
     providers:
-      - {name: elevenlabs, weight: 60}
-      - {name: azure, weight: 25}
+      - {name: elevenlabs, weight: 40}
+      - {name: cartesia, weight: 30}
+      - {name: fish, weight: 15}
       - {name: openai, weight: 15}
 
-  ptbr:                        # textos curtos → OpenAI; senão edge → google → openai
+  ptbr:
     strategy: first
     providers: [edge, google, openai]
     rules:
@@ -103,16 +161,44 @@ models:
     providers: [mock]
 
 # ============================================================
-#  Cache e padrões
+#  Rotas STT
+# ============================================================
+stt_models:
+  auto:
+    strategy: first
+    providers: [openai, deepgram, whisper]
+
+  local:
+    providers: [whisper]
+
+  rapido:
+    strategy: first
+    providers: [deepgram, openai]
+
+# ============================================================
+#  Auth (opcional) — / e /health ficam públicos
+# ============================================================
+auth:
+  enabled: false
+  default_rpm: 60
+  keys:
+    - name: local
+      key_env: VOXROUTER_API_KEY
+      rpm: 120
+
+# ============================================================
+#  Cache, cotas e servidor
 # ============================================================
 cache:
   enabled: true
-  ttl_s: 86400                 # 24h
+  ttl_s: 86400
   dir: ./cache
 
 quota_state:
-  file: ./quota.json           # consumo de cotas persistido (sobrevive a restarts)
+  file: ./quota.json
+  sync_interval_s: 300
 
 default_model: auto
-host: 127.0.0.1
-port: 8000
+default_stt_model: auto
+host: ${VOXROUTER_HOST:-127.0.0.1}
+port: ${VOXROUTER_PORT:-8000}

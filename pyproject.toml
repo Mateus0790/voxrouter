@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxrouter"
-version = "0.1.0"
-description = "Roteador de voz unificado para modelos de geração de voz por IA (API compatível com OpenAI)"
+version = "0.2.0"
+description = "Roteador de voz unificado para IA: TTS e STT com failover, cotas, streaming e API compatível com OpenAI"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
@@ -14,10 +14,12 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.6",
     "edge-tts>=6.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+local-stt = ["faster-whisper>=1.0"]
 
 [project.scripts]
 voxrouter = "voxrouter.main:main"

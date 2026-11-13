@@ -1,54 +1,77 @@
 # VoxRouter
 
 Roteador de voz unificado para modelos de geração de voz por IA — uma única API
-(compatível com a OpenAI `/v1/audio/speech`) na frente de vários provedores:
-ElevenLabs, OpenAI, Google Cloud TTS, Azure Speech, Microsoft Edge TTS (grátis),
-Kokoro e OmniVoice (locais).
+(compatível com a OpenAI `/v1/audio/speech` e `/v1/audio/transcriptions`) na frente
+de vários provedores: Edge TTS (grátis), OpenAI, ElevenLabs, Google, Azure,
+Cartesia, Deepgram, Fish Audio, Kokoro, OmniVoice e Whisper local.
 
 Ele decide **para qual modelo enviar cada pedido** e troca automaticamente quando
-um provedor cai, fica caro demais, ou não atende a regra da rota.
+um provedor cai, fica sem cota, ou não atende a regra da rota.
 
-## Recursos
+## Recursos (v0.2)
 
-- **API compatível com OpenAI** — funciona com o SDK oficial da OpenAI (basta trocar `base_url`)
-- **Sintaxe direta** `provedor/voz` — `edge/pt-BR-FranciscaNeural`, `openai/tts-1-hd`, `elevenlabs/<id-da-voz>`
+- **API compatível com OpenAI** — SDK oficial com `base_url` trocado
+- **Sintaxe direta** `provedor/voz` — `edge/pt-BR-FranciscaNeural`, `cartesia/<uuid>`
 - **Rotas nomeadas** com estratégias: `first`, `random`, `round_robin`, `weighted`, `cheapest`, `quota_aware`
-- **Cotas (quota-aware)**: cota de caracteres por período por provedor — o roteador desvia de provedores sem cota, persiste o consumo entre restarts e usa `quota_aware` para escolher o mais barato entre os que ainda têm cota
-- **Descoberta de vozes** (`/v1/voices`): catálogo de vozes por provedor com filtros de idioma e busca
-- **Regras de roteamento** por voz, idioma, formato, tamanho do texto, trecho do texto
-- **Failover automático** + circuit breaker (cooldown crescente por provedor)
-- **Cache em disco** (TTL configurável, chave determinística por parâmetros)
-- **Health, stats e console web** em `http://127.0.0.1:8000`
+- **Cotas** com sync remoto (ElevenLabs) + persistência em disco
+- **Aliases de voz** — mesma persona em vários provedores (`voices:`)
+- **Textos longos** — split por frase + concat MP3/WAV
+- **Streaming** com failover antes do primeiro byte
+- **STT** via `/v1/audio/transcriptions` (OpenAI, Deepgram, Whisper local)
+- **Auth + rate limit** por chave (`Bearer` + RPM)
+- **Cache**, circuit breaker, `/health`, `/stats`, console web
 
-## Instalação
+## Instalação local
 
 ```bash
 cd voxrouter
 py -3.12 -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"
+# STT local (opcional):
+# .venv/Scripts/python -m pip install -e ".[local-stt]"
 ```
-
-## Executar
 
 ```bash
-.venv/Scripts/python -m voxrouter --config config.example.yaml
+cp config.example.yaml config.yaml
+.venv/Scripts/python -m voxrouter --config config.yaml
 # console: http://127.0.0.1:8000  |  docs: http://127.0.0.1:8000/docs
 ```
+
+## Docker Compose
+
+```bash
+cp .env.example .env          # preencha as chaves que for usar
+cp config.example.yaml config.yaml
+touch quota.json              # cotas persistidas (bind mount)
+docker compose up --build
+```
+
+Só Edge + mock funcionam **sem nenhuma chave**. Para Cartesia/Deepgram/Fish/OpenAI/etc.,
+preencha `.env` e mantenha os provedores na rota `models.auto`.
+
+Kokoro local opcional: descomente o serviço `kokoro` em `docker-compose.yml`.
 
 ## Uso rápido
 
 ```bash
-# rota nomeada (configuração decide o provedor)
+# rota nomeada
 curl -X POST http://127.0.0.1:8000/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{"model":"auto","input":"Olá, mundo!"}' -o saida.mp3
 
-# sintaxe direta: provedor/voz (sem tocar na config)
+# sintaxe direta
 curl -X POST http://127.0.0.1:8000/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"model":"edge/pt-BR-FranciscaNeural","input":"Testando o roteador."}' -o saida2.mp3
+  -d '{"model":"edge/pt-BR-FranciscaNeural","input":"Testando."}' -o saida2.mp3
 
-# com o SDK oficial da OpenAI:
+# alias de voz + streaming
+curl -X POST http://127.0.0.1:8000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","voice":"pt-br-narradora-feminina","input":"Oi","stream":true}' -o stream.mp3
+
+# transcrição
+curl -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
+  -F file=@saida.mp3 -F model=auto -F response_format=text
 ```
 
 ```python
@@ -61,129 +84,76 @@ with client.audio.speech.with_streaming_response.create(
     resp.stream_to_file("out.mp3")
 ```
 
-A resposta traz cabeçalhos úteis: `X-Provider`, `X-Voice`, `X-Latency-Ms`, `X-Cache`.
+Cabeçalhos úteis: `X-Provider`, `X-Voice`, `X-Latency-Ms`, `X-Cache`.
 
 ## Configuração
 
-Copie `config.example.yaml` para `config.yaml` e ajuste. Dois blocos:
+Copie `config.example.yaml` → `config.yaml`. Blocos principais:
 
-**`providers`** — cada provedor tem `type`, `api_key_env` (variável de ambiente com a
-chave), `base_url`, `options` específicas, `cooldown_s` (janela do circuit breaker),
-`weight` e `cost_per_char` (para a estratégia `cheapest`).
+| Bloco | Função |
+|-------|--------|
+| `providers` | tipo, `api_key_env`, `base_url`, `options`, `quota`, `max_chars` |
+| `models` | rotas TTS + estratégias + regras |
+| `stt_models` | rotas de transcrição |
+| `voices` | aliases lógicos → voz por provedor (`strict: true` pula sem mapeamento) |
+| `auth` | chaves Bearer + RPM |
+| `cache` / `quota_state` | disco e sync |
 
-**`models`** — rotas nomeadas:
-
-```yaml
-models:
-  auto:                        # tenta na ordem, com failover
-    strategy: first
-    providers: [kokoro, edge, openai]
-
-  qualidade:
-    strategy: weighted
-    providers:
-      - {name: elevenlabs, weight: 60}
-      - {name: openai, weight: 40}
-
-  ptbr:
-    strategy: first
-    providers: [edge, google, openai]
-    rules:                     # primeira regra que bater substitui a lista
-      - if: {voice_regex: "^pt-BR", text_max_chars: 300}
-        providers: [openai, edge]
-```
-
-Condições suportadas em `if`: `voice`, `voice_regex`, `language`, `format`,
+Condições em `if`: `voice`, `voice_regex`, `language`, `format`,
 `text_max_chars`, `text_min_chars`, `contains`.
 
-## Cotas (quota-aware)
+## Cotas
 
-Cada provedor pode ter uma cota de caracteres por período; o consumo é
-persistido em `quota.json` (caminho em `quota_state.file`) e sobrevive a
-restarts. Semântica:
-
-- Consumo conta **apenas em sínteses bem-sucedidas** — falha e cache hit não consomem.
-- Provedor `exhausted` vai para o fim da fila em toda estratégia; se **todos**
-  estiverem exaustos, o roteador mantém a ordem normal (degradação graciosa em vez de 503).
-- `reserve` marca os últimos X% como `low` (vai pro fim, mas ainda é usável).
-- A estratégia `quota_aware` escolhe o **mais barato entre os que ainda têm cota**.
-
-```yaml
-providers:
-  edge:
-    type: edge
-    quota:
-      limit: 100000     # caracteres
-      period: month     # day | month
-      reserve: 0.05     # últimos 5% = "low"
-```
+- Consome **só em síntese OK** (falha e cache hit não contam).
+- `exhausted` vai pro fim; se todos exaustos, mantém ordem (não 503).
+- `quota.sync: true` sincroniza com a API (ElevenLabs).
 
 ```bash
-curl http://127.0.0.1:8000/quota                # uso por provedor
+curl http://127.0.0.1:8000/quota
+curl -X POST http://127.0.0.1:8000/quota/sync
 curl -X POST "http://127.0.0.1:8000/quota/reset?provider=edge"
 ```
 
-## Descoberta de vozes
-
-```bash
-curl "http://127.0.0.1:8000/v1/voices?provider=edge&language=pt-BR"
-curl "http://127.0.0.1:8000/v1/voices?search=francisca"
-```
-
-O Edge busca a lista ao vivo da Microsoft (cache 1h, fallback estático se
-offline); Azure, Google, Kokoro e OpenAI usam catálogos estáticos curados;
-ElevenLabs lista as vozes da sua conta quando a chave está presente.
-
-Campos aceitos na chamada: `model`, `input`, `voice`, `response_format`
-(`mp3|wav|opus|aac|flac|pcm`), `speed`, `language` — e qualquer campo extra é
-repassado ao provedor (`extra`), útil para `ref_audio`/`instruct` do OmniVoice
-ou `lang_code` do Kokoro.
-
 ## Provedores
 
-| type        | Provedor                     | Chave (env)              | Observações                                        |
-|-------------|------------------------------|--------------------------|----------------------------------------------------|
-| `edge`      | Microsoft Edge TTS           | nenhuma                  | grátis; pt-BR-AntonioNeural, pt-BR-FranciscaNeural |
-| `openai`    | OpenAI TTS                   | `OPENAI_API_KEY`         | tts-1, tts-1-hd, gpt-4o-mini-tts                    |
-| `elevenlabs`| ElevenLabs                   | `ELEVENLABS_API_KEY`     | clonagem de voz premium; `elevenlabs/<id-da-voz>`   |
-| `google`    | Google Cloud TTS             | `GOOGLE_TTS_API_KEY`     | vozes Neural2 (pt-BR-Neural2-C...)                 |
-| `azure`     | Azure Speech                 | `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION` | via SSML          |
-| `kokoro`    | Kokoro (local)               | nenhuma                  | `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu` |
-| `omnivoice` | OmniVoice (local)            | nenhuma                  | `omnivoice-openai-tts-server --port 6655`          |
-| `mock`      | Tom senoidal WAV             | nenhuma                  | testes; `options.fail: true` simula queda          |
+| type | Provedor | Chave (env) | Notas |
+|------|----------|-------------|-------|
+| `edge` | Microsoft Edge TTS | — | grátis; pt-BR |
+| `openai` | OpenAI TTS + Whisper STT | `OPENAI_API_KEY` | tts-1 / whisper-1 |
+| `elevenlabs` | ElevenLabs | `ELEVENLABS_API_KEY` | sync de cota |
+| `google` | Google Cloud TTS | `GOOGLE_TTS_API_KEY` | Neural2 pt-BR |
+| `azure` | Azure Speech | `AZURE_SPEECH_KEY` + região | SSML |
+| `cartesia` | Cartesia Sonic | `CARTESIA_API_KEY` | voz = UUID |
+| `deepgram` | Deepgram Aura/Nova | `DEEPGRAM_API_KEY` | TTS + STT |
+| `fish` | Fish Audio | `FISH_API_KEY` | `reference_id` |
+| `kokoro` | Kokoro local | — | `:8880` |
+| `omnivoice` | OmniVoice local | — | `:6655` |
+| `whisper_local` | faster-whisper | — | só STT |
+| `mock` | seno WAV | — | testes |
 
 ## Endpoints
 
-| Método | Rota                | Descrição                                    |
-|--------|---------------------|----------------------------------------------|
-| POST   | `/v1/audio/speech`  | síntese (compatível com OpenAI)              |
-| GET    | `/v1/models`        | rotas disponíveis + sintaxe direta           |
-| GET    | `/v1/voices`        | catálogo de vozes (filtros: `provider`, `language`, `search`) |
-| GET    | `/quota`            | uso de cota por provedor                     |
-| POST   | `/quota/reset`      | zera a cota (`?provider=` para um só)        |
-| GET    | `/health`           | status dos provedores (breaker + quota)      |
-| GET    | `/stats`            | contadores por provedor                      |
-| POST   | `/cache/clear`      | limpa o cache                                |
-| GET    | `/`                 | console web de teste                         |
-
-## Adicionar um provedor
-
-1. Crie `voxrouter/providers/seuprovedor.py` com uma classe herdeira de
-   `BaseProvider` (implemente `synthesize`, lance `ProviderError` em falha).
-2. Registre em `REGISTRY` no `voxrouter/providers/__init__.py`.
-3. Adicione o bloco em `config.yaml` e use em qualquer rota.
-
-## Console web
-
-Além do console embutido em `/`, há um widget standalone em
-[`demo/widget.html`](demo/widget.html) — abra-o em qualquer página (ou no Hermes)
-com o servidor rodando e ele fala com `http://127.0.0.1:8000` via CORS.
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/v1/audio/speech` | síntese (streaming opcional) |
+| POST | `/v1/audio/transcriptions` | STT (multipart) |
+| GET | `/v1/models` | rotas TTS + STT |
+| GET | `/v1/voices` | catálogo (`provider`, `language`, `search`) |
+| GET | `/quota` | uso por provedor |
+| POST | `/quota/sync` | sincroniza cotas remotas |
+| POST | `/quota/reset` | zera cota |
+| GET | `/health` | breaker + quota |
+| GET | `/stats` | contadores |
+| POST | `/cache/clear` | limpa cache |
+| GET | `/` | console web |
 
 ## Testes
 
 ```bash
 .venv/Scripts/python -m pytest -q
 ```
+
+CI (GitHub Actions): pytest em 3.10–3.12 + build Docker + smoke `/health`.
 
 ## Aviso ético
 

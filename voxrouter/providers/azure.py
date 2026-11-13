@@ -11,17 +11,18 @@ from .base import BaseProvider, ProviderContext, ProviderError, SynthesisRequest
 FORMATS = {
     "mp3": "audio-24khz-48kbitrate-mono-mp3",
     "wav": "riff-24khz-16bit-mono-pcm",
-    "opus": "audio-24khz-16kbitrate-mono-opus",
-    "ogg": "ogg-24khz-16bit-mono-opus",
+    "opus": "ogg-24khz-16bit-mono-opus",
     "pcm": "raw-24khz-16bit-mono-pcm",
 }
-
-RESULT_FMT = {"wav": "wav", "opus": "ogg", "ogg": "ogg", "pcm": "pcm"}
 
 
 class AzureProvider(BaseProvider):
     type = "azure"
     direct_as_voice = True
+    default_max_chars = 5000
+
+    def output_format(self, req: SynthesisRequest) -> str:
+        return req.response_format if req.response_format in FORMATS else "mp3"
 
     async def synthesize(self, req: SynthesisRequest, ctx: ProviderContext) -> SynthesisResult:
         key = self.api_key()
@@ -29,14 +30,14 @@ class AzureProvider(BaseProvider):
         if not key or not region:
             raise ProviderError(self.name, "faltam AZURE_SPEECH_KEY e AZURE_SPEECH_REGION (ou options.region)")
         voice = ctx.voice or req.voice or self.cfg.options.get("voice", "pt-BR-FranciscaNeural")
-        lang = req.language or self.cfg.options.get("language", "pt-BR")
-        out_fmt = FORMATS.get(req.response_format, "audio-24khz-48kbitrate-mono-mp3")
+        lang = req.language or self.cfg.options.get("language") or "-".join(voice.split("-")[:2])
+        fmt = self.output_format(req)
         rate_pct = int(round((req.speed - 1.0) * 100))
         ssml = (
             f'<speak version="1.0" xml:lang="{lang}">'
             f'<voice name="{voice}"><prosody rate="{rate_pct:+d}%">{html.escape(req.text)}</prosody></voice></speak>'
         )
-        base = self.cfg.base_url or f"https://{region}.tts.speech.microsoft.com"
+        base = (self.cfg.base_url or f"https://{region}.tts.speech.microsoft.com").rstrip("/")
         t0 = time.monotonic()
         resp = await self.client.post(
             f"{base}/cognitiveservices/v1",
@@ -44,14 +45,14 @@ class AzureProvider(BaseProvider):
             headers={
                 "Ocp-Apim-Subscription-Key": key,
                 "Content-Type": "application/ssml+xml",
-                "X-Microsoft-OutputFormat": out_fmt,
+                "X-Microsoft-OutputFormat": FORMATS[fmt],
             },
         )
         if resp.status_code != 200:
             raise ProviderError(self.name, f"Azure {resp.status_code}: {resp.text[:300]}", resp.status_code)
         return SynthesisResult(
             audio=resp.content,
-            format=RESULT_FMT.get(req.response_format, "mp3"),
+            format=fmt,
             provider=self.name,
             model=voice,
             voice=voice,

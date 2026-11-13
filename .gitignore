@@ -13,3 +13,7 @@ demo-quota.json
 demo-cache/
 *.egg-info/
 quota.json
+.env
+config.yaml
+.debug_stream.py
+.docs-tmp/

@@ -1,0 +1,69 @@
+# VoxRouter local com chaves via .env
+#
+# 1. cp .env.example .env          # preencha as chaves
+# 2. cp config.example.yaml config.yaml
+# 3. touch quota.json              # arquivo de cotas (bind mount)
+# 4. docker compose up --build
+#
+# Console: http://127.0.0.1:8000  |  Docs: http://127.0.0.1:8000/docs
+
+services:
+  voxrouter:
+    build: .
+    image: voxrouter:local
+    container_name: voxrouter
+    ports:
+      - "${VOXROUTER_PORT:-8000}:8000"
+    environment:
+      VOXROUTER_HOST: "0.0.0.0"
+      VOXROUTER_PORT: "8000"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      GOOGLE_TTS_API_KEY: ${GOOGLE_TTS_API_KEY:-}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-eastus}
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      FISH_API_KEY: ${FISH_API_KEY:-}
+      VOXROUTER_API_KEY: ${VOXROUTER_API_KEY:-}
+      KOKORO_URL: ${KOKORO_URL:-http://kokoro:8880}
+      OMNIVOICE_URL: ${OMNIVOICE_URL:-http://host.docker.internal:6655}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./cache:/app/cache
+      - ./quota.json:/app/quota.json
+    command:
+      [
+        "python",
+        "-m",
+        "voxrouter",
+        "--config",
+        "/app/config.yaml",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Opcional: TTS local Kokoro (descomente se quiser)
+  # kokoro:
+  #   image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+  #   ports:
+  #     - "8880:8880"
+  #   restart: unless-stopped

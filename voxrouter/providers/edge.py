@@ -1,8 +1,10 @@
-"""Microsoft Edge TTS — grátis, sem chave de API. Vozes: pt-BR-AntonioNeural, pt-BR-FranciscaNeural, ..."""
+"""Microsoft Edge TTS — grátis, sem chave de API, com streaming nativo.
+Vozes: pt-BR-AntonioNeural, pt-BR-FranciscaNeural, ..."""
 
 from __future__ import annotations
 
 import time
+from typing import AsyncIterator
 
 from .base import BaseProvider, ProviderContext, ProviderError, SynthesisRequest, SynthesisResult
 
@@ -11,29 +13,40 @@ class EdgeProvider(BaseProvider):
     type = "edge"
     direct_as_voice = True
 
-    async def synthesize(self, req: SynthesisRequest, ctx: ProviderContext) -> SynthesisResult:
+    def output_format(self, req: SynthesisRequest) -> str:
+        return "mp3"
+
+    def _voice(self, req: SynthesisRequest, ctx: ProviderContext) -> str:
+        return ctx.voice or req.voice or self.cfg.options.get("voice", "pt-BR-AntonioNeural")
+
+    async def stream(self, req: SynthesisRequest, ctx: ProviderContext) -> AsyncIterator[bytes]:
         import edge_tts  # import tardio
 
-        voice = ctx.voice or req.voice or self.cfg.options.get("voice", "pt-BR-AntonioNeural")
+        voice = self._voice(req, ctx)
         rate_pct = max(-50, min(100, int(round((req.speed - 1.0) * 100))))
-        rate = f"{rate_pct:+d}%"
-        t0 = time.monotonic()
+        got = False
         try:
-            com = edge_tts.Communicate(req.text, voice, rate=rate)
-            audio = bytearray()
+            com = edge_tts.Communicate(req.text, voice, rate=f"{rate_pct:+d}%")
             async for chunk in com.stream():
-                if chunk["type"] == "audio":
-                    audio.extend(chunk["data"])
+                if chunk.get("type") == "audio" and chunk.get("data"):
+                    got = True
+                    yield chunk.get("data", b"")
+        except ProviderError:
+            raise
         except Exception as exc:
             raise ProviderError(self.name, f"edge-tts: {exc}") from exc
-        if not audio:
+        if not got:
             raise ProviderError(self.name, "edge-tts retornou áudio vazio")
+
+    async def synthesize(self, req: SynthesisRequest, ctx: ProviderContext) -> SynthesisResult:
+        t0 = time.monotonic()
+        audio = b"".join([c async for c in self.stream(req, ctx)])
         return SynthesisResult(
-            audio=bytes(audio),
+            audio=audio,
             format="mp3",
             provider=self.name,
             model="edge-tts",
-            voice=voice,
+            voice=self._voice(req, ctx),
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
 
@@ -59,7 +72,7 @@ class EdgeProvider(BaseProvider):
                 if v.get("ShortName")
             ]
         except Exception:
-            out = [dict(v) for v in EDGE_FALLBACK]
+            out = [{**v, "provider": self.name} for v in EDGE_FALLBACK]
         self._voices = (now, out)
         return out
 
@@ -68,7 +81,6 @@ EDGE_FALLBACK = [
     {"voice": "pt-BR-AntonioNeural", "locale": "pt-BR", "gender": "Male", "label": "Microsoft Antonio (pt-BR)"},
     {"voice": "pt-BR-FranciscaNeural", "locale": "pt-BR", "gender": "Female", "label": "Microsoft Francisca (pt-BR)"},
     {"voice": "pt-BR-ThalitaNeural", "locale": "pt-BR", "gender": "Female", "label": "Microsoft Thalita (pt-BR)"},
-    {"voice": "pt-BR-BrendaNeural", "locale": "pt-BR", "gender": "Female", "label": "Microsoft Brenda (pt-BR)"},
     {"voice": "en-US-AriaNeural", "locale": "en-US", "gender": "Female", "label": "Microsoft Aria (en-US)"},
     {"voice": "en-US-GuyNeural", "locale": "en-US", "gender": "Male", "label": "Microsoft Guy (en-US)"},
     {"voice": "en-US-JennyNeural", "locale": "en-US", "gender": "Female", "label": "Microsoft Jenny (en-US)"},

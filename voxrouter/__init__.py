@@ -1,6 +1,6 @@
 """VoxRouter — roteador de voz unificado para modelos de geração de voz por IA."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .router import AllProvidersFailed, UnknownModel, VoiceRouter
 from .api import create_app

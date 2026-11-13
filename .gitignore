@@ -8,3 +8,4 @@ demo/*.mp3
 demo/*.wav
 demo/body.json
 demo/*.txt
+*.egg-info/

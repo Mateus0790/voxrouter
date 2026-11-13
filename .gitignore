@@ -12,3 +12,4 @@ demo/quota-demo.yaml
 demo-quota.json
 demo-cache/
 *.egg-info/
+quota.json

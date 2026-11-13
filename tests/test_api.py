@@ -96,6 +96,34 @@ def test_ui(client):
     assert "VoxRouter" in r.text
 
 
+def test_voices(client):
+    r = client.get("/v1/voices")
+    assert r.status_code == 200
+    voices = [v["voice"] for v in r.json()["data"]]
+    assert "tone1" in voices and "tone2" in voices
+
+
+def test_voices_filtros(client):
+    r = client.get("/v1/voices", params={"provider": "m1", "search": "tone2"})
+    assert [v["voice"] for v in r.json()["data"]] == ["tone2"]
+    r2 = client.get("/v1/voices", params={"provider": "m1", "language": "mock"})
+    assert len(r2.json()["data"]) == 3
+    r3 = client.get("/v1/voices", params={"provider": "nao-existe"})
+    assert r3.status_code == 400
+
+
+def test_quota_endpoint(client):
+    r = client.get("/quota")
+    assert r.status_code == 200
+    assert r.json()["m1"]["status"] == "unlimited"
+
+
+def test_quota_reset_endpoint(client):
+    r = client.post("/quota/reset")
+    assert r.status_code == 200
+    assert r.json() == {"reset": "*"}
+
+
 def test_cache_header(tmp_path):
     cfg = dict(CONFIG)
     cfg["cache"] = {"enabled": True, "ttl_s": 60, "dir": str(tmp_path / "cache")}

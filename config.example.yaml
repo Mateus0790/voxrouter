@@ -7,6 +7,10 @@ providers:
   edge:                       # grátis, sem chave (Microsoft Edge TTS)
     type: edge
     cost_per_char: 0.0001     # unidade arbitrária p/ estratégia 'cheapest'
+    quota:                    # opcional: cota de caracteres por período (controle local)
+      limit: 100000           # ajuste à sua realidade de uso
+      period: month           # day | month
+      reserve: 0.05           # últimos 5% = status "low" (vai pro fim da fila)
     options:
       voice: pt-BR-AntonioNeural
 
@@ -32,6 +36,9 @@ providers:
     type: google
     api_key_env: GOOGLE_TTS_API_KEY
     cost_per_char: 0.0004
+    quota:
+      limit: 1000000          # free tier do Google: 1M chars/mês
+      period: month
     options:
       language_code: pt-BR
       voice: pt-BR-Neural2-C
@@ -74,6 +81,10 @@ models:
     strategy: cheapest
     providers: [edge, kokoro, google, openai, elevenlabs]
 
+  economico:                   # quota_aware: mais barato ENTRE os que ainda têm cota
+    strategy: quota_aware
+    providers: [edge, google, openai]
+
   qualidade:
     strategy: weighted
     providers:
@@ -98,6 +109,9 @@ cache:
   enabled: true
   ttl_s: 86400                 # 24h
   dir: ./cache
+
+quota_state:
+  file: ./quota.json           # consumo de cotas persistido (sobrevive a restarts)
 
 default_model: auto
 host: 127.0.0.1

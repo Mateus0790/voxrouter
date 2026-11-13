@@ -36,3 +36,42 @@ class EdgeProvider(BaseProvider):
             voice=voice,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        """Catálogo ao vivo da Microsoft (cache 1h); fallback estático se offline."""
+        now = time.monotonic()
+        cached = getattr(self, "_voices", None)
+        if cached is not None and now - cached[0] < 3600:
+            return cached[1]
+        try:
+            import edge_tts
+
+            raw = await edge_tts.list_voices()
+            out = [
+                {
+                    "voice": v["ShortName"],
+                    "locale": v.get("Locale"),
+                    "gender": v.get("Gender"),
+                    "label": v.get("FriendlyName") or v["ShortName"],
+                    "provider": self.name,
+                }
+                for v in raw
+                if v.get("ShortName")
+            ]
+        except Exception:
+            out = [dict(v) for v in EDGE_FALLBACK]
+        self._voices = (now, out)
+        return out
+
+
+EDGE_FALLBACK = [
+    {"voice": "pt-BR-AntonioNeural", "locale": "pt-BR", "gender": "Male", "label": "Microsoft Antonio (pt-BR)"},
+    {"voice": "pt-BR-FranciscaNeural", "locale": "pt-BR", "gender": "Female", "label": "Microsoft Francisca (pt-BR)"},
+    {"voice": "pt-BR-ThalitaNeural", "locale": "pt-BR", "gender": "Female", "label": "Microsoft Thalita (pt-BR)"},
+    {"voice": "pt-BR-BrendaNeural", "locale": "pt-BR", "gender": "Female", "label": "Microsoft Brenda (pt-BR)"},
+    {"voice": "en-US-AriaNeural", "locale": "en-US", "gender": "Female", "label": "Microsoft Aria (en-US)"},
+    {"voice": "en-US-GuyNeural", "locale": "en-US", "gender": "Male", "label": "Microsoft Guy (en-US)"},
+    {"voice": "en-US-JennyNeural", "locale": "en-US", "gender": "Female", "label": "Microsoft Jenny (en-US)"},
+    {"voice": "es-ES-AlvaroNeural", "locale": "es-ES", "gender": "Male", "label": "Microsoft Álvaro (es-ES)"},
+    {"voice": "es-ES-ElviraNeural", "locale": "es-ES", "gender": "Female", "label": "Microsoft Elvira (es-ES)"},
+]

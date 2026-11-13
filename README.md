@@ -12,7 +12,9 @@ um provedor cai, fica caro demais, ou não atende a regra da rota.
 
 - **API compatível com OpenAI** — funciona com o SDK oficial da OpenAI (basta trocar `base_url`)
 - **Sintaxe direta** `provedor/voz` — `edge/pt-BR-FranciscaNeural`, `openai/tts-1-hd`, `elevenlabs/<id-da-voz>`
-- **Rotas nomeadas** com estratégias: `first`, `random`, `round_robin`, `weighted`, `cheapest`
+- **Rotas nomeadas** com estratégias: `first`, `random`, `round_robin`, `weighted`, `cheapest`, `quota_aware`
+- **Cotas (quota-aware)**: cota de caracteres por período por provedor — o roteador desvia de provedores sem cota, persiste o consumo entre restarts e usa `quota_aware` para escolher o mais barato entre os que ainda têm cota
+- **Descoberta de vozes** (`/v1/voices`): catálogo de vozes por provedor com filtros de idioma e busca
 - **Regras de roteamento** por voz, idioma, formato, tamanho do texto, trecho do texto
 - **Failover automático** + circuit breaker (cooldown crescente por provedor)
 - **Cache em disco** (TTL configurável, chave determinística por parâmetros)
@@ -94,6 +96,44 @@ models:
 Condições suportadas em `if`: `voice`, `voice_regex`, `language`, `format`,
 `text_max_chars`, `text_min_chars`, `contains`.
 
+## Cotas (quota-aware)
+
+Cada provedor pode ter uma cota de caracteres por período; o consumo é
+persistido em `quota.json` (caminho em `quota_state.file`) e sobrevive a
+restarts. Semântica:
+
+- Consumo conta **apenas em sínteses bem-sucedidas** — falha e cache hit não consomem.
+- Provedor `exhausted` vai para o fim da fila em toda estratégia; se **todos**
+  estiverem exaustos, o roteador mantém a ordem normal (degradação graciosa em vez de 503).
+- `reserve` marca os últimos X% como `low` (vai pro fim, mas ainda é usável).
+- A estratégia `quota_aware` escolhe o **mais barato entre os que ainda têm cota**.
+
+```yaml
+providers:
+  edge:
+    type: edge
+    quota:
+      limit: 100000     # caracteres
+      period: month     # day | month
+      reserve: 0.05     # últimos 5% = "low"
+```
+
+```bash
+curl http://127.0.0.1:8000/quota                # uso por provedor
+curl -X POST "http://127.0.0.1:8000/quota/reset?provider=edge"
+```
+
+## Descoberta de vozes
+
+```bash
+curl "http://127.0.0.1:8000/v1/voices?provider=edge&language=pt-BR"
+curl "http://127.0.0.1:8000/v1/voices?search=francisca"
+```
+
+O Edge busca a lista ao vivo da Microsoft (cache 1h, fallback estático se
+offline); Azure, Google, Kokoro e OpenAI usam catálogos estáticos curados;
+ElevenLabs lista as vozes da sua conta quando a chave está presente.
+
 Campos aceitos na chamada: `model`, `input`, `voice`, `response_format`
 (`mp3|wav|opus|aac|flac|pcm`), `speed`, `language` — e qualquer campo extra é
 repassado ao provedor (`extra`), útil para `ref_audio`/`instruct` do OmniVoice
@@ -118,7 +158,10 @@ ou `lang_code` do Kokoro.
 |--------|---------------------|----------------------------------------------|
 | POST   | `/v1/audio/speech`  | síntese (compatível com OpenAI)              |
 | GET    | `/v1/models`        | rotas disponíveis + sintaxe direta           |
-| GET    | `/health`           | status dos provedores (breaker incluído)     |
+| GET    | `/v1/voices`        | catálogo de vozes (filtros: `provider`, `language`, `search`) |
+| GET    | `/quota`            | uso de cota por provedor                     |
+| POST   | `/quota/reset`      | zera a cota (`?provider=` para um só)        |
+| GET    | `/health`           | status dos provedores (breaker + quota)      |
 | GET    | `/stats`            | contadores por provedor                      |
 | POST   | `/cache/clear`      | limpa o cache                                |
 | GET    | `/`                 | console web de teste                         |

@@ -40,3 +40,26 @@ class GoogleProvider(BaseProvider):
             voice=voice,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        """Catálogo estático curado (a lista completa exige a API voices:list com chave)."""
+        return [
+            {"voice": v, "locale": loc, "gender": g, "label": f"Google {v}", "provider": self.name}
+            for v, loc, g in GOOGLE_VOICES
+        ]
+
+
+GOOGLE_VOICES = [
+    ("pt-BR-Neural2-A", "pt-BR", "Female"), ("pt-BR-Neural2-B", "pt-BR", "Male"),
+    ("pt-BR-Neural2-C", "pt-BR", "Female"), ("pt-BR-Neural2-D", "pt-BR", "Male"),
+    ("en-US-Neural2-A", "en-US", "Female"), ("en-US-Neural2-B", "en-US", "Male"),
+    ("en-US-Neural2-C", "en-US", "Female"), ("en-US-Neural2-D", "en-US", "Male"),
+    ("en-US-Neural2-F", "en-US", "Female"), ("en-US-Neural2-I", "en-US", "Male"),
+    ("en-GB-Neural2-A", "en-GB", "Female"), ("en-GB-Neural2-B", "en-GB", "Male"),
+    ("es-ES-Neural2-A", "es-ES", "Female"), ("es-ES-Neural2-B", "es-ES", "Male"),
+    ("fr-FR-Neural2-A", "fr-FR", "Female"), ("fr-FR-Neural2-B", "fr-FR", "Male"),
+    ("de-DE-Neural2-A", "de-DE", "Female"), ("de-DE-Neural2-B", "de-DE", "Male"),
+    ("it-IT-Neural2-A", "it-IT", "Female"), ("it-IT-Neural2-C", "it-IT", "Male"),
+    ("ja-JP-Neural2-B", "ja-JP", "Female"), ("ja-JP-Neural2-C", "ja-JP", "Male"),
+    ("zh-CN-Neural2-A", "zh-CN", "Female"), ("zh-CN-Neural2-B", "zh-CN", "Male"),
+]

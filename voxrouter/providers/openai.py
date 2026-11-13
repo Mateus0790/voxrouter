@@ -39,3 +39,16 @@ class OpenAIProvider(BaseProvider):
             voice=voice,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        return [
+            {"voice": v, "locale": None, "gender": None, "label": label, "provider": self.name}
+            for v, label in OPENAI_VOICES
+        ]
+
+
+OPENAI_VOICES = [
+    ("alloy", "Alloy"), ("ash", "Ash"), ("ballad", "Ballad"), ("coral", "Coral"),
+    ("echo", "Echo"), ("fable", "Fable"), ("nova", "Nova"), ("onyx", "Onyx"),
+    ("sage", "Sage"), ("shimmer", "Shimmer"), ("verse", "Verse"),
+]

@@ -87,6 +87,10 @@ class BaseProvider(abc.ABC):
     async def synthesize(self, req: SynthesisRequest, ctx: ProviderContext) -> SynthesisResult:
         """Gera áudio. Deve lançar ProviderError em caso de falha."""
 
+    async def list_voices(self) -> list[dict[str, Any]]:
+        """Catálogo de vozes do provedor (alimenta GET /v1/voices). Pode retornar []."""
+        return []
+
     def describe(self) -> dict[str, Any]:
         return {
             "name": self.name,

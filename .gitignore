@@ -8,4 +8,7 @@ demo/*.mp3
 demo/*.wav
 demo/body.json
 demo/*.txt
+demo/quota-demo.yaml
+demo-quota.json
+demo-cache/
 *.egg-info/

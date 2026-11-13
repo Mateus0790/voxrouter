@@ -57,3 +57,26 @@ class AzureProvider(BaseProvider):
             voice=voice,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        """Catálogo estático curado (lista completa: ~500 vozes, exige chave)."""
+        return [
+            {"voice": v, "locale": loc, "gender": g, "label": f"Azure {v}", "provider": self.name}
+            for v, loc, g in AZURE_VOICES
+        ]
+
+
+AZURE_VOICES = [
+    ("pt-BR-FranciscaNeural", "pt-BR", "Female"), ("pt-BR-AntonioNeural", "pt-BR", "Male"),
+    ("pt-BR-ThalitaNeural", "pt-BR", "Female"), ("pt-BR-BrendaNeural", "pt-BR", "Female"),
+    ("pt-BR-DonatoNeural", "pt-BR", "Male"), ("pt-BR-FabioNeural", "pt-BR", "Male"),
+    ("en-US-JennyNeural", "en-US", "Female"), ("en-US-GuyNeural", "en-US", "Male"),
+    ("en-US-AriaNeural", "en-US", "Female"), ("en-US-DavisNeural", "en-US", "Male"),
+    ("es-ES-ElviraNeural", "es-ES", "Female"), ("es-ES-AlvaroNeural", "es-ES", "Male"),
+    ("fr-FR-DeniseNeural", "fr-FR", "Female"), ("fr-FR-HenriNeural", "fr-FR", "Male"),
+    ("de-DE-KatjaNeural", "de-DE", "Female"), ("de-DE-ConradNeural", "de-DE", "Male"),
+    ("it-IT-ElsaNeural", "it-IT", "Female"), ("it-IT-DiegoNeural", "it-IT", "Male"),
+    ("ja-JP-NanamiNeural", "ja-JP", "Female"), ("ja-JP-KeitaNeural", "ja-JP", "Male"),
+    ("zh-CN-XiaoxiaoNeural", "zh-CN", "Female"), ("zh-CN-YunxiNeural", "zh-CN", "Male"),
+    ("ko-KR-SunHiNeural", "ko-KR", "Female"), ("ko-KR-InJoonNeural", "ko-KR", "Male"),
+]

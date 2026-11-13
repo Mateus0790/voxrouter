@@ -17,6 +17,7 @@ from .providers.base import (
     SynthesisRequest,
     SynthesisResult,
 )
+from .quota import QuotaManager
 from .state import CircuitBreaker, Stats
 
 
@@ -52,6 +53,7 @@ class VoiceRouter:
         self.breaker = CircuitBreaker()
         self.stats = Stats()
         self.cache = AudioCache(config.cache)
+        self.quota = QuotaManager(config.quota_state.file)
         self._rr: dict[str, int] = {}
 
     # ---------------------------------------------------------------- resolução
@@ -148,6 +150,29 @@ class VoiceRouter:
 
     # ------------------------------------------------------------------ síntese
 
+    _QUOTA_RANK = {"unlimited": 0, "ok": 0, "low": 1, "exhausted": 2}
+
+    def _quota_class(self, cand: Candidate) -> str:
+        q = cand.provider.cfg.quota
+        if q is None:
+            return "unlimited"
+        return self.quota.status(cand.name, q)
+
+    def _quota_order(self, cands: list[Candidate], strategy: str) -> list[Candidate]:
+        """Quota-aware: exaustos vão pro fim; 'low' atrás dos 'ok'.
+
+        Se TODOS estão exaustos, mantém a ordem normal (degradação graciosa em
+        vez de 503) — comportamento inspirado no OmniRoute.
+        """
+        if not cands:
+            return cands
+        base = list(cands)
+        if strategy == "quota_aware":
+            base = sorted(base, key=lambda c: c.cost_per_char)
+        if any(self._quota_class(c) != "exhausted" for c in base):
+            base = sorted(base, key=lambda c: self._QUOTA_RANK[self._quota_class(c)])
+        return base
+
     def cache_key(self, req: SynthesisRequest, cand: Candidate) -> str:
         return AudioCache.key(
             {
@@ -166,7 +191,9 @@ class VoiceRouter:
     async def synthesize(self, req: SynthesisRequest) -> SynthesisResult:
         self.stats.requests += 1
         cands, strategy = self._resolve(req)
-        ordered = self._order(cands, strategy, req.model or self.config.default_model)
+        ordered = self._quota_order(
+            self._order(cands, strategy, req.model or self.config.default_model), strategy
+        )
         attempts: list[dict[str, str]] = []
         for cand in ordered:
             if not self.breaker.available(cand.name):
@@ -200,6 +227,9 @@ class VoiceRouter:
                 continue
             self.breaker.record_success(cand.name)
             self.stats.record_ok(cand.name, res.latency_ms)
+            q = cand.provider.cfg.quota
+            if q is not None:
+                self.quota.consume(cand.name, q, len(req.text))
             if self.cache.enabled:
                 self.cache.put(ckey, res.audio, res.format)
             return res
@@ -216,5 +246,17 @@ class VoiceRouter:
         for name, p in self.providers.items():
             d = p.describe()
             d.update(self.breaker.snapshot(name))
+            q = p.cfg.quota
+            d["quota"] = (
+                None
+                if q is None
+                else {
+                    "limit": q.limit,
+                    "period": q.period,
+                    "used": self.quota.used(name, q),
+                    "remaining": self.quota.remaining(name, q),
+                    "status": self.quota.status(name, q),
+                }
+            )
             providers.append(d)
         return {"status": "ok", "providers": providers}

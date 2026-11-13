@@ -44,3 +44,10 @@ class MockProvider(BaseProvider):
             voice=ctx.voice or "mock",
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        return [
+            {"voice": "tone1", "locale": "mock", "gender": None, "label": "Tom 440 Hz", "provider": self.name},
+            {"voice": "tone2", "locale": "mock", "gender": None, "label": "Tom 660 Hz", "provider": self.name},
+            {"voice": "tone3", "locale": "mock", "gender": None, "label": "Tom 880 Hz", "provider": self.name},
+        ]

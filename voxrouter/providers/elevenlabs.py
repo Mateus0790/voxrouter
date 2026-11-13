@@ -52,3 +52,29 @@ class ElevenLabsProvider(BaseProvider):
             voice=voice_id,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        """Lista as vozes da sua conta (exige chave; [] se ausente ou com erro)."""
+        key = self.api_key()
+        if not key:
+            return []
+        try:
+            resp = await self.client.get("/v1/voices", headers={"xi-api-key": key})
+            if resp.status_code != 200:
+                return []
+            labels = {}
+            out = []
+            for v in resp.json().get("voices", []):
+                labels = v.get("labels") or {}
+                out.append(
+                    {
+                        "voice": v.get("voice_id"),
+                        "label": v.get("name") or v.get("voice_id"),
+                        "locale": labels.get("language"),
+                        "gender": labels.get("gender"),
+                        "provider": self.name,
+                    }
+                )
+            return out
+        except Exception:
+            return []

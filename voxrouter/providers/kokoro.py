@@ -35,3 +35,27 @@ class KokoroProvider(BaseProvider):
             voice=voice,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    async def list_voices(self) -> list[dict]:
+        return [
+            {"voice": v, "locale": loc, "gender": g, "label": f"Kokoro {v}", "provider": self.name}
+            for v, loc, g in KOKORO_VOICES
+        ]
+
+
+# prefixos Kokoro: af_=americano F, am_=americano M, bf_=britânico F, bm_=britânico M, etc.
+KOKORO_VOICES = [
+    ("af_heart", "en-US", "Female"), ("af_alloy", "en-US", "Female"),
+    ("af_bella", "en-US", "Female"), ("af_nicole", "en-US", "Female"),
+    ("af_nova", "en-US", "Female"), ("af_sarah", "en-US", "Female"),
+    ("af_sky", "en-US", "Female"), ("am_adam", "en-US", "Male"),
+    ("am_michael", "en-US", "Male"), ("am_onyx", "en-US", "Male"),
+    ("bf_alice", "en-GB", "Female"), ("bf_emma", "en-GB", "Female"),
+    ("bf_lily", "en-GB", "Female"), ("bm_daniel", "en-GB", "Male"),
+    ("bm_george", "en-GB", "Male"), ("bm_lewis", "en-GB", "Male"),
+    ("ef_dora", "es-ES", "Female"), ("em_santa", "es-ES", "Male"),
+    ("ff_siwis", "fr-FR", "Female"), ("if_sara", "it-IT", "Female"),
+    ("jf_alpha", "ja-JP", "Female"), ("jf_daisuke", "ja-JP", "Male"),
+    ("zf_xiaobei", "zh-CN", "Female"), ("zm_yunjian", "zh-CN", "Male"),
+    ("hf_alpha", "hi-IN", "Female"), ("zm_yunxi", "zh-CN", "Male"),
+]

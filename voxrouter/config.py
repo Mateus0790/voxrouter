@@ -8,7 +8,31 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-STRATEGIES = ("first", "random", "round_robin", "weighted", "cheapest")
+STRATEGIES = ("first", "random", "round_robin", "weighted", "cheapest", "quota_aware")
+
+
+class QuotaConfig(BaseModel):
+    """Cota de caracteres por período (controle local, persistido em disco)."""
+
+    limit: int
+    period: str = "month"  # day | month
+    reserve: float = 0.0  # fração final = status "low"
+
+    @model_validator(mode="after")
+    def _check(self) -> "QuotaConfig":
+        if self.limit < 0:
+            raise ValueError("quota.limit não pode ser negativo")
+        if self.period not in ("day", "month"):
+            raise ValueError(f"quota.period deve ser 'day' ou 'month' (recebido: {self.period})")
+        if not 0 <= self.reserve < 1:
+            raise ValueError("quota.reserve deve estar em [0, 1)")
+        return self
+
+
+class QuotaStateConfig(BaseModel):
+    """Onde o consumo de cota é persistido (sobrevive a restarts)."""
+
+    file: str = "./quota.json"
 
 
 class ProviderConfig(BaseModel):
@@ -21,6 +45,7 @@ class ProviderConfig(BaseModel):
     cooldown_s: float = 30.0
     weight: float = 1.0
     cost_per_char: float = 0.0
+    quota: QuotaConfig | None = None
 
 
 class ProviderRef(BaseModel):
@@ -67,6 +92,7 @@ class RouterConfig(BaseModel):
     providers: dict[str, ProviderConfig]
     models: dict[str, ModelRoute]
     cache: CacheConfig = Field(default_factory=CacheConfig)
+    quota_state: QuotaStateConfig = Field(default_factory=QuotaStateConfig)
     default_model: str = "auto"
     host: str = "127.0.0.1"
     port: int = 8000

@@ -116,6 +116,47 @@ def create_app(config: RouterConfig | str | Path) -> FastAPI:
     async def stats() -> dict[str, Any]:
         return router.stats.snapshot()
 
+    @app.get("/quota")
+    async def quota() -> dict[str, Any]:
+        return router.quota.snapshot(cfg.providers)
+
+    @app.post("/quota/reset")
+    async def quota_reset(provider: str | None = None) -> dict[str, Any]:
+        router.quota.reset(provider)
+        return {"reset": provider or "*"}
+
+    @app.get("/v1/voices")
+    async def voices(
+        provider: str | None = None,
+        language: str | None = None,
+        search: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        names = [provider] if provider else list(router.providers)
+        data: list[dict[str, Any]] = []
+        for name in names:
+            p = router.providers.get(name)
+            if p is None:
+                raise HTTPException(
+                    400,
+                    detail=f"provedor desconhecido: '{name}'. Disponíveis: {sorted(router.providers)}",
+                )
+            try:
+                data.extend(await p.list_voices())
+            except Exception:
+                pass  # catálogo é melhor esforço; nunca derruba o endpoint
+        if language:
+            lang = language.lower()
+            data = [v for v in data if (v.get("locale") or "").lower().startswith(lang)]
+        if search:
+            s = search.lower()
+            data = [
+                v
+                for v in data
+                if s in v.get("voice", "").lower() or s in (v.get("label") or "").lower()
+            ]
+        return {"object": "list", "data": data[: max(1, min(limit, 1000))]}
+
     @app.post("/cache/clear", include_in_schema=False)
     async def clear_cache() -> dict[str, Any]:
         return {"removed": router.cache.clear()}
@@ -175,6 +216,7 @@ UI_HTML = """<!doctype html>
   <div id="status"></div>
   <audio id="player" controls style="display:none"></audio>
   <details><summary>Rotas &amp; sintaxe direta</summary><pre id="hint"></pre></details>
+  <details><summary>Cotas (quota-aware)</summary><pre id="quota">carregando...</pre></details>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -203,8 +245,20 @@ async function go() {
   } catch (e) { status('Erro: ' + e.message, true); }
   finally { btn.disabled = false; }
 }
+async function loadVoices() {
+  try {
+    const r = await fetch('/v1/voices?limit=500');
+    const j = await r.json();
+    $('voices').innerHTML = j.data.map(v => '<option value="' + v.voice + '">').join('');
+  } catch (e) {}
+}
+async function loadQuota() {
+  try { const j = await (await fetch('/quota')).json(); $('quota').textContent = JSON.stringify(j, null, 2); } catch (e) {}
+}
 $('go').onclick = go;
 loadModels();
+loadVoices();
+loadQuota();
 </script>
 </body>
 </html>

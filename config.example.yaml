@@ -1,0 +1,104 @@
+# ============================================================
+#  VoxRouter — configuração de provedores e rotas
+#  Copie para config.yaml e ajuste.
+# ============================================================
+
+providers:
+  edge:                       # grátis, sem chave (Microsoft Edge TTS)
+    type: edge
+    cost_per_char: 0.0001     # unidade arbitrária p/ estratégia 'cheapest'
+    options:
+      voice: pt-BR-AntonioNeural
+
+  openai:
+    type: openai
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    cost_per_char: 0.0006
+    options:
+      model: tts-1
+      voice: alloy
+
+  elevenlabs:
+    type: elevenlabs
+    api_key_env: ELEVENLABS_API_KEY
+    base_url: https://api.elevenlabs.io
+    cost_per_char: 0.0015
+    options:
+      model: eleven_multilingual_v2
+      voice_id: 21m00Tcm4TlvDq8ikWAM
+
+  google:
+    type: google
+    api_key_env: GOOGLE_TTS_API_KEY
+    cost_per_char: 0.0004
+    options:
+      language_code: pt-BR
+      voice: pt-BR-Neural2-C
+
+  azure:
+    type: azure
+    api_key_env: AZURE_SPEECH_KEY
+    cost_per_char: 0.0008
+    options:
+      region: eastus            # ou variável de ambiente AZURE_SPEECH_REGION
+      voice: pt-BR-FranciscaNeural
+
+  kokoro:                      # local: kokoro-fastapi (docker) em :8880
+    type: kokoro
+    base_url: http://localhost:8880
+    cost_per_char: 0.0
+    options:
+      voice: af_heart
+
+  omnivoice:                   # local: omnivoice-openai-tts-server em :6655
+    type: omnivoice
+    base_url: http://localhost:6655
+    cost_per_char: 0.0
+    options:
+      model: omnivoice
+
+  mock:                        # tom senoidal WAV p/ testes (options.fail: true simula queda)
+    type: mock
+    cost_per_char: 0.0
+
+# ============================================================
+#  Rotas: nome do modelo → provedores + estratégia + regras
+# ============================================================
+models:
+  auto:                        # rota padrão: tenta na ordem, com failover automático
+    strategy: first
+    providers: [kokoro, edge, openai]
+
+  barato:
+    strategy: cheapest
+    providers: [edge, kokoro, google, openai, elevenlabs]
+
+  qualidade:
+    strategy: weighted
+    providers:
+      - {name: elevenlabs, weight: 60}
+      - {name: azure, weight: 25}
+      - {name: openai, weight: 15}
+
+  ptbr:                        # textos curtos → OpenAI; senão edge → google → openai
+    strategy: first
+    providers: [edge, google, openai]
+    rules:
+      - if: {voice_regex: "^pt-BR", text_max_chars: 300}
+        providers: [openai, edge]
+
+  mock:
+    providers: [mock]
+
+# ============================================================
+#  Cache e padrões
+# ============================================================
+cache:
+  enabled: true
+  ttl_s: 86400                 # 24h
+  dir: ./cache
+
+default_model: auto
+host: 127.0.0.1
+port: 8000

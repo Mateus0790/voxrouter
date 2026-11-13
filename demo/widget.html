@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxRouter</title>
+<style>
+  :root { font-family: inherit; }
+  * { box-sizing: border-box; }
+  .vr { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+  .vr h2 { margin: 0 0 2px; font-size: 15px; font-weight: 700; color: var(--foreground); }
+  .vr h2 b { color: var(--accent); }
+  .vr .sub { font-size: 12px; color: var(--muted-foreground); margin: 0 0 6px; }
+  .vr label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted-foreground); display: block; margin-bottom: 4px; }
+  .vr select, .vr input[type=text], .vr textarea {
+    width: 100%; background: var(--card); color: var(--foreground);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  }
+  .vr textarea { min-height: 70px; resize: vertical; }
+  .vr .row { display: flex; gap: 10px; }
+  .vr .row > div { flex: 1; }
+  .vr button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 10px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  .vr button:disabled { opacity: .45; cursor: default; }
+  .vr .status { font-size: 12px; color: var(--muted-foreground); min-height: 15px; }
+  .vr .status.err { color: #ff6b6b; }
+  .vr audio { width: 100%; }
+  .vr .hint { font-size: 11px; color: var(--muted-foreground); }
+</style>
+</head>
+<body>
+<div class="vr">
+  <h2>Vox<b>Router</b> — teste ao vivo</h2>
+  <p class="sub">Envia o texto para <code>http://127.0.0.1:8000</code> e mostra qual provedor atendeu.</p>
+  <div class="row">
+    <div>
+      <label>Modelo (rota)</label>
+      <select id="model"></select>
+    </div>
+    <div>
+      <label>Voz (opcional)</label>
+      <input type="text" id="voice" placeholder="pt-BR-FranciscaNeural" list="voices">
+      <datalist id="voices">
+        <option value="pt-BR-AntonioNeural"></option>
+        <option value="pt-BR-FranciscaNeural"></option>
+        <option value="pt-BR-ThalitaNeural"></option>
+        <option value="pt-BR-BrendaNeural"></option>
+        <option value="alloy"></option>
+        <option value="af_heart"></option>
+      </datalist>
+    </div>
+  </div>
+  <div>
+    <label>Texto</label>
+    <textarea id="text">Olá! Estou testando o roteador de voz direto do chat.</textarea>
+  </div>
+  <button id="go">Gerar voz</button>
+  <div class="status" id="status">Conectando…</div>
+  <audio id="player" controls style="display:none"></audio>
+  <p class="hint" id="hint"></p>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const status = (m, err) => { $('status').textContent = m; $('status').className = 'status' + (err ? ' err' : ''); };
+async function load() {
+  try {
+    const r = await fetch('http://127.0.0.1:8000/v1/models');
+    const j = await r.json();
+    $('model').innerHTML = j.data.map(m => '<option value="' + m.id + '">' + m.id + ' — ' + m.providers.join(', ') + '</option>').join('');
+    $('hint').textContent = 'Sintaxe direta: ' + j.direct_syntax.join('  ');
+    status('Pronto. Servidor conectado.');
+  } catch (e) {
+    status('Servidor offline — rode: python -m voxrouter --config config.example.yaml', true);
+  }
+}
+async function go() {
+  const btn = $('go'); btn.disabled = true; $('player').style.display = 'none';
+  status('Gerando…');
+  try {
+    const body = { model: $('model').value, input: $('text').value, response_format: 'mp3' };
+    const v = $('voice').value.trim(); if (v) body.voice = v;
+    const t0 = performance.now();
+    const r = await fetch('http://127.0.0.1:8000/v1/audio/speech', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      const d = j.detail;
+      throw new Error(typeof d === 'string' ? d : (d && d.message) || r.statusText);
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    $('player').src = url; $('player').style.display = 'block'; $('player').play();
+    status('✓ ' + r.headers.get('X-Provider') + ' · ' + (r.headers.get('X-Voice') || r.headers.get('X-Model')) + ' · ' + r.headers.get('X-Latency-Ms') + 'ms · cache ' + r.headers.get('X-Cache'));
+  } catch (e) { status('Erro: ' + e.message, true); }
+  finally { btn.disabled = false; }
+}
+$('go').onclick = go;
+load();
+</script>
+</body>
+</html>
